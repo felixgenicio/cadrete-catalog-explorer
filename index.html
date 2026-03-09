@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Novedades – Biblioteca Municipal de Cadrete</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary:   #2c6e3f;
+      --primary-dk:#1e4d2c;
+      --bg:        #f5f5f0;
+      --card-bg:   #ffffff;
+      --text:      #222;
+      --muted:     #666;
+      --radius:    10px;
+      --shadow:    0 2px 8px rgba(0,0,0,.10);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--primary);
+      color: #fff;
+      padding: 1.5rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1.2rem;
+    }
+    header svg { flex-shrink: 0; }
+    header h1 { font-size: 1.4rem; font-weight: 700; line-height: 1.2; }
+    header p  { font-size: .9rem; opacity: .85; margin-top: .2rem; }
+
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 3rem;
+    }
+
+    .section-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--primary-dk);
+      margin-bottom: 1.2rem;
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #ddd;
+    }
+
+    #updated-label {
+      font-size: .8rem;
+      color: var(--muted);
+      margin-bottom: 1.2rem;
+    }
+
+    #total-label {
+      font-size: .85rem;
+      color: var(--muted);
+      margin-bottom: 1.2rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 1.25rem;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: transform .2s, box-shadow .2s;
+      text-decoration: none;
+      color: inherit;
+    }
+    .card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 6px 18px rgba(0,0,0,.15);
+    }
+
+    .card-cover {
+      width: 100%;
+      aspect-ratio: 2/3;
+      object-fit: cover;
+      background: #e8e8e8;
+      display: block;
+    }
+.card-body {
+      padding: .75rem;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: .3rem;
+    }
+    .card-title {
+      font-size: .85rem;
+      font-weight: 600;
+      line-height: 1.3;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .card-author {
+      font-size: .78rem;
+      color: var(--muted);
+      display: -webkit-box;
+      -webkit-line-clamp: 1;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .card-pub {
+      font-size: .72rem;
+      color: #999;
+      margin-top: auto;
+    }
+
+    /* Estado inicial / error */
+    .state {
+      text-align: center;
+      padding: 4rem 1rem;
+      color: var(--muted);
+    }
+    .state-icon { font-size: 2.5rem; margin-bottom: .75rem; }
+    .state p { font-size: .95rem; }
+
+    /* Spinner de carga inicial */
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid #ddd;
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+      margin: 0 auto 1rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Indicador de carga al hacer scroll */
+    #load-more {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: .6rem;
+      padding: 2rem;
+      color: var(--muted);
+      font-size: .9rem;
+    }
+    #load-more .mini-spinner {
+      width: 20px; height: 20px;
+      border: 2px solid #ddd;
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+      flex-shrink: 0;
+    }
+    #load-more.hidden { display: none; }
+
+    /* Sentinel invisible para IntersectionObserver */
+    #sentinel { height: 1px; }
+
+    footer {
+      text-align: center;
+      padding: 1.5rem;
+      font-size: .8rem;
+      color: #aaa;
+      border-top: 1px solid #e5e5e5;
+    }
+    footer a { color: var(--primary); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+  </svg>
+  <div>
+    <h1>Biblioteca Municipal de Cadrete</h1>
+    <p>Últimas novedades en el catálogo</p>
+  </div>
+</header>
+
+<main>
+  <div id="updated-label"></div>
+  <h2 class="section-title">Novedades recientes</h2>
+  <div id="total-label"></div>
+
+  <div id="content">
+    <div class="state">
+      <div class="spinner"></div>
+      <p>Cargando novedades…</p>
+    </div>
+  </div>
+
+  <div id="load-more" class="hidden">
+    <div class="mini-spinner"></div>
+    <span>Cargando más libros…</span>
+  </div>
+
+  <div id="sentinel"></div>
+</main>
+
+<footer>
+  Datos extraídos del <a href="https://bibliotecas.aragon.es" target="_blank" rel="noopener">Catálogo de la Red de Bibliotecas de Aragón</a>
+</footer>
+
+<script>
+(() => {
+  const PLACEHOLDER = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 300'%3E%3Crect width='200' height='300' fill='%23e0ebe5'/%3E%3Crect x='40' y='30' width='120' height='160' rx='4' fill='%23c8ddd0'/%3E%3Crect x='40' y='30' width='8' height='160' fill='%23b0ccc0'/%3E%3Crect x='55' y='55' width='80' height='6' rx='3' fill='%2382b090'/%3E%3Crect x='55' y='70' width='60' height='5' rx='2' fill='%2382b090' opacity='.7'/%3E%3Crect x='55' y='83' width='70' height='5' rx='2' fill='%2382b090' opacity='.5'/%3E%3Ccircle cx='100' cy='145' r='22' fill='%232c6e3f' opacity='.25'/%3E%3Cpath d='M91 145 l6-8 l4 5 l5-7 l7 10 z' fill='%232c6e3f' opacity='.4'/%3E%3Crect x='30' y='210' width='140' height='6' rx='3' fill='%2382b090' opacity='.5'/%3E%3Crect x='50' y='225' width='100' height='5' rx='2' fill='%2382b090' opacity='.35'/%3E%3C/svg%3E`;
+
+  const PAGE_SIZE   = 10;
+  const contentEl   = document.getElementById('content');
+  const updatedEl   = document.getElementById('updated-label');
+  const totalEl     = document.getElementById('total-label');
+  const loadMoreEl  = document.getElementById('load-more');
+  const sentinelEl  = document.getElementById('sentinel');
+
+  let grid      = null;   // elemento <div class="grid">
+  let nextStart = 1;      // próxima petición
+  let total     = null;   // total de resultados
+  let loading   = false;
+
+  // ── IntersectionObserver ─────────────────────────────────
+  const observer = new IntersectionObserver(entries => {
+    if (entries[0].isIntersecting) loadPage();
+  }, { rootMargin: '200px' });
+
+  // ── Carga inicial ────────────────────────────────────────
+  loadPage();
+
+  async function loadPage() {
+    if (loading) return;
+    if (total !== null && nextStart > total) return;
+
+    loading = true;
+    if (nextStart > 1) loadMoreEl.classList.remove('hidden');
+
+    try {
+      const res  = await fetch(`proxy.php?start=${nextStart}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      // Primera página: inicializar UI
+      if (nextStart === 1) {
+        contentEl.innerHTML = '';
+        grid = document.createElement('div');
+        grid.className = 'grid';
+        contentEl.appendChild(grid);
+
+        if (data.updated) {
+          const d = new Date(data.updated);
+          updatedEl.textContent = `Actualizado: ${d.toLocaleDateString('es-ES', {
+            day: '2-digit', month: 'long', year: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+          })}`;
+        }
+      }
+
+      // Guardar total y actualizar etiqueta
+      if (data.total) {
+        total = data.total;
+        totalEl.textContent = `${total} novedades encontradas`;
+      }
+
+      appendBooks(data.books);
+      nextStart += PAGE_SIZE;
+
+      // Activar observer si quedan más páginas
+      if (nextStart <= (total ?? Infinity) && data.books.length === PAGE_SIZE) {
+        observer.observe(sentinelEl);
+      } else {
+        observer.unobserve(sentinelEl);
+        if (total !== null) {
+          totalEl.textContent += ` · mostrando todos`;
+        }
+      }
+
+    } catch (err) {
+      if (nextStart === 1) {
+        contentEl.innerHTML = `
+          <div class="state">
+            <div class="state-icon">⚠️</div>
+            <p>No se pudieron cargar las novedades.<br><small>${escHtml(err.message)}</small></p>
+          </div>`;
+      }
+    } finally {
+      loading = false;
+      loadMoreEl.classList.add('hidden');
+    }
+  }
+
+  function appendBooks(books) {
+    for (const book of books) {
+      const card = document.createElement('a');
+      card.className = 'card';
+      card.href = book.url || '#';
+      card.target = '_blank';
+      card.rel = 'noopener noreferrer';
+      card.title = [book.title, book.author].filter(Boolean).join(' — ');
+
+      const coverHtml = book.cover
+        ? `<img class="card-cover" src="${escHtml(book.cover)}" alt="${escHtml(book.title)}" loading="lazy" onerror="this.src=PLACEHOLDER;this.onerror=null">`
+        : `<img class="card-cover" src="${PLACEHOLDER}" alt="">`;
+
+      card.innerHTML = `
+        ${coverHtml}
+        <div class="card-body">
+          <div class="card-title">${escHtml(book.title)}</div>
+          ${book.author ? `<div class="card-author">${escHtml(book.author)}</div>` : ''}
+          ${book.publication ? `<div class="card-pub">${escHtml(book.publication)}</div>` : ''}
+        </div>`;
+
+      grid.appendChild(card);
+    }
+  }
+
+  function escHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+})();
+</script>
+
+</body>
+</html>
