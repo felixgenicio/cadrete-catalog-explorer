@@ -300,7 +300,8 @@ function serveCover(string $url): void
 {
     $allowed = ['covers.absys.cloud', 'bibliotecas.aragon.es'];
     $host = parse_url($url, PHP_URL_HOST);
-    if (!$host || !in_array($host, $allowed, true)) {
+    $port = parse_url($url, PHP_URL_PORT);
+    if (!$host || !in_array($host, $allowed, true) || $port !== null) {
         http_response_code(400);
         exit;
     }
@@ -333,7 +334,7 @@ function serveCover(string $url): void
     ]);
     $imgData     = curl_exec($ch);
     $httpCode    = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+    $contentType = strtok(curl_getinfo($ch, CURLINFO_CONTENT_TYPE), "\r\n");
     curl_close($ch);
 
     if (!$imgData || $httpCode !== 200 || !str_starts_with($contentType, 'image/')) {
