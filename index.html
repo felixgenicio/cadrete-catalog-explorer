@@ -182,6 +182,195 @@
     }
     footer a { color: var(--primary); text-decoration: none; }
     footer a:hover { text-decoration: underline; }
+
+    /* ── Modal ───────────────────────────────────────────── */
+    #modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.55);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity .22s, visibility .22s;
+    }
+    #modal-overlay.open {
+      opacity: 1;
+      visibility: visible;
+    }
+    #modal-panel {
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.3);
+      max-width: 700px;
+      width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
+      transform: scale(.96);
+      transition: transform .22s;
+    }
+    #modal-overlay.open #modal-panel { transform: scale(1); }
+
+    #modal-close {
+      position: sticky;
+      top: 0;
+      display: flex;
+      justify-content: flex-end;
+      padding: .75rem .75rem 0;
+      background: #fff;
+      z-index: 1;
+    }
+    #modal-close button {
+      background: #f0f0f0;
+      border: none;
+      border-radius: 50%;
+      width: 34px; height: 34px;
+      font-size: 1rem;
+      cursor: pointer;
+      color: #555;
+      transition: background .15s;
+      line-height: 1;
+    }
+    #modal-close button:hover { background: #e0e0e0; }
+
+    #modal-body { padding: 0 1.5rem 1.75rem; }
+
+    .modal-inner {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 500px) {
+      .modal-inner { grid-template-columns: 1fr; }
+    }
+
+    .modal-cover {
+      width: 100%;
+      aspect-ratio: 2/3;
+      object-fit: cover;
+      border-radius: 8px;
+      box-shadow: 0 4px 14px rgba(0,0,0,.18);
+      display: block;
+    }
+
+    .modal-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      line-height: 1.35;
+      margin-bottom: .3rem;
+      color: var(--text);
+    }
+    .modal-author {
+      font-size: .88rem;
+      color: var(--primary);
+      font-weight: 500;
+      margin-bottom: 1.1rem;
+    }
+
+    /* Chips de metadatos destacados */
+    .modal-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .4rem;
+      margin-bottom: 1rem;
+    }
+    .modal-chip {
+      background: #eaf3ee;
+      color: var(--primary-dk);
+      border-radius: 20px;
+      padding: .2rem .7rem;
+      font-size: .76rem;
+      font-weight: 600;
+    }
+    .modal-chip-label {
+      font-weight: 400;
+      color: #6a9a78;
+      margin-right: .2rem;
+    }
+
+    /* Lista de campos secundarios */
+    .modal-fields {
+      background: var(--bg);
+      border-radius: 8px;
+      padding: .5rem .75rem;
+      display: flex;
+      flex-direction: column;
+    }
+    .modal-field {
+      display: grid;
+      grid-template-columns: 115px 1fr;
+      gap: .4rem;
+      font-size: .8rem;
+      padding: .35rem 0;
+      border-bottom: 1px solid #e8e8e3;
+    }
+    .modal-field:last-child { border-bottom: none; }
+    .modal-field-label { color: #999; font-weight: 500; }
+    .modal-field-value { color: #333; }
+
+    .modal-synopsis {
+      margin-top: 1.1rem;
+      font-size: .85rem;
+      line-height: 1.6;
+      color: #444;
+      background: #fffef5;
+      border-left: 3px solid var(--primary);
+      padding: .75rem 1rem;
+      border-radius: 0 6px 6px 0;
+    }
+
+    .modal-holdings {
+      margin-top: 1.25rem;
+      border-top: 1px solid #eee;
+      padding-top: 1rem;
+    }
+    .modal-holdings h3 {
+      font-size: .75rem;
+      font-weight: 700;
+      color: var(--primary-dk);
+      margin-bottom: .65rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .modal-holdings table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+    .modal-holdings th {
+      text-align: left;
+      padding: .45rem .65rem;
+      background: var(--bg);
+      font-weight: 600;
+      color: #555;
+      border-bottom: 2px solid #ddd;
+    }
+    .modal-holdings td { padding: .4rem .65rem; border-bottom: 1px solid #f0f0f0; }
+    .badge-disponible {
+      display: inline-block;
+      background: #d4edda;
+      color: #1a6632;
+      border-radius: 10px;
+      padding: .1rem .55rem;
+      font-size: .75rem;
+      font-weight: 600;
+    }
+    .badge-prestado {
+      display: inline-block;
+      background: #fde8cd;
+      color: #8a4a00;
+      border-radius: 10px;
+      padding: .1rem .55rem;
+      font-size: .75rem;
+      font-weight: 600;
+    }
+
+    .modal-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--muted);
+    }
+    .modal-state .spinner { margin: 0 auto .75rem; }
   </style>
 </head>
 <body>
@@ -219,6 +408,20 @@
 <footer>
   Datos extraídos del <a href="https://bibliotecas.aragon.es" target="_blank" rel="noopener">Catálogo de la Red de Bibliotecas de Aragón</a>
 </footer>
+
+<div id="modal-overlay" role="dialog" aria-modal="true" aria-label="Detalle del libro">
+  <div id="modal-panel">
+    <div id="modal-close">
+      <button aria-label="Cerrar">✕</button>
+    </div>
+    <div id="modal-body">
+      <div class="modal-state">
+        <div class="spinner"></div>
+        <p>Cargando información del libro…</p>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script>
 (() => {
@@ -311,8 +514,6 @@
       const card = document.createElement('a');
       card.className = 'card';
       card.href = book.url || '#';
-      card.target = '_blank';
-      card.rel = 'noopener noreferrer';
       card.title = [book.title, book.author].filter(Boolean).join(' — ');
 
       const coverHtml = book.cover
@@ -327,6 +528,11 @@
           ${book.publication ? `<div class="card-pub">${escHtml(book.publication)}</div>` : ''}
         </div>`;
 
+      card.addEventListener('click', e => {
+        e.preventDefault();
+        showBookDetail(book);
+      });
+
       grid.appendChild(card);
     }
   }
@@ -334,6 +540,141 @@
   function escHtml(str) {
     if (!str) return '';
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── Modal ──────────────────────────────────────────────────
+  const overlay   = document.getElementById('modal-overlay');
+  const modalBody = document.getElementById('modal-body');
+  const closeBtn  = document.querySelector('#modal-close button');
+
+  closeBtn.addEventListener('click', closeModal);
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+  function openModal() {
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeModal() {
+    overlay.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  async function showBookDetail(book) {
+    modalBody.innerHTML = `
+      <div class="modal-state">
+        <div class="spinner"></div>
+        <p>Cargando información del libro…</p>
+      </div>`;
+    openModal();
+
+    try {
+      const params = book.detail_params || (() => {
+        try { return new URL(book.url).search.slice(1); } catch { return ''; }
+      })();
+      if (!params) throw new Error('No se encontraron los parámetros del libro');
+
+      const res  = await fetch(`proxy.php?detail=${encodeURIComponent(params)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      renderDetail(book, data);
+    } catch (err) {
+      modalBody.innerHTML = `
+        <div class="modal-state">
+          <div style="font-size:2rem;margin-bottom:.5rem">⚠️</div>
+          <p>No se pudo cargar el detalle del libro.<br>
+          <small style="color:#aaa">${escHtml(err.message)}</small></p>
+        </div>`;
+    }
+  }
+
+  // Títulos genéricos que devuelve el OPAC como tipo de documento
+  const GENERIC_TITLES = new Set(['documento', 'registro', 'record', 'monografía', 'monografia']);
+
+  function renderDetail(book, data) {
+    const cover = data.cover || book.cover;
+    const rawTitle = data.title || '';
+    const title = (rawTitle && !GENERIC_TITLES.has(rawTitle.toLowerCase())) ? rawTitle : book.title;
+
+    // Campos a mostrar como chips destacados
+    const CHIP_LABELS = ['año', 'editorial', 'isbn', 'colección', 'coleccion', 'edición', 'edicion'];
+    // Campos a excluir de la lista secundaria (ya en chips o ya en cabecera)
+    const EXCLUDE = new Set(['título', 'titulo', 'title', 'autor', 'author', ...CHIP_LABELS]);
+
+    const allFields = data.fields || [];
+
+    // Autor: priorizar campo explícito sobre el dato de la tarjeta
+    let author = book.author;
+    const authorField = allFields.find(f => /^autor|^author/i.test(f.label));
+    if (authorField) author = authorField.value;
+
+    const chips = allFields.filter(f => CHIP_LABELS.includes(f.label.toLowerCase()));
+    const secondary = allFields.filter(f => !EXCLUDE.has(f.label.toLowerCase()));
+
+    const coverHtml = cover
+      ? `<img class="modal-cover" src="${escHtml(cover)}" alt="${escHtml(title)}" onerror="this.src=PLACEHOLDER;this.onerror=null">`
+      : `<img class="modal-cover" src="${PLACEHOLDER}" alt="">`;
+
+    const chipsHtml = chips.length ? `
+      <div class="modal-chips">
+        ${chips.map(f => `
+          <span class="modal-chip">
+            <span class="modal-chip-label">${escHtml(f.label)}</span>${escHtml(f.value)}
+          </span>`).join('')}
+      </div>` : '';
+
+    const fieldsHtml = secondary.length ? `
+      <div class="modal-fields">
+        ${secondary.map(f => `
+          <div class="modal-field">
+            <span class="modal-field-label">${escHtml(f.label)}</span>
+            <span class="modal-field-value">${escHtml(f.value)}</span>
+          </div>`).join('')}
+      </div>` : '';
+
+    const synopsisHtml = data.synopsis
+      ? `<div class="modal-synopsis">${escHtml(data.synopsis)}</div>` : '';
+
+    let holdingsHtml = '';
+    if (data.holdings && data.holdings.length > 0) {
+      const first = data.holdings[0];
+      const availKey = Object.keys(first).find(k => /disponib/i.test(k));
+      if (Array.isArray(first)) {
+        const rows = data.holdings.map(h =>
+          `<tr>${h.map(c => `<td>${escHtml(c)}</td>`).join('')}</tr>`).join('');
+        holdingsHtml = `<table><tbody>${rows}</tbody></table>`;
+      } else {
+        const cols = Object.keys(first);
+        const head = `<tr>${cols.map(c => `<th>${escHtml(c)}</th>`).join('')}</tr>`;
+        const rows = data.holdings.map(h =>
+          `<tr>${cols.map(c => {
+            const val = h[c] || '';
+            if (availKey && c === availKey) {
+              const cls = /disponible/i.test(val) ? 'badge-disponible' : 'badge-prestado';
+              return `<td><span class="${cls}">${escHtml(val)}</span></td>`;
+            }
+            return `<td>${escHtml(val)}</td>`;
+          }).join('')}</tr>`).join('');
+        holdingsHtml = `<table><thead>${head}</thead><tbody>${rows}</tbody></table>`;
+      }
+      holdingsHtml = `<div class="modal-holdings"><h3>Disponibilidad</h3>${holdingsHtml}</div>`;
+    }
+
+    modalBody.innerHTML = `
+      <div class="modal-inner">
+        ${coverHtml}
+        <div class="modal-info">
+          <div class="modal-title">${escHtml(title)}</div>
+          ${author ? `<div class="modal-author">${escHtml(author)}</div>` : ''}
+          ${chipsHtml}
+          ${fieldsHtml}
+        </div>
+      </div>
+      ${synopsisHtml}
+      ${holdingsHtml}`;
   }
 
 })();

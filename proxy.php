@@ -27,6 +27,14 @@ if (isset($_GET['cover'])) {
     exit;
 }
 
+// ---------- modo detalle ----------
+if (isset($_GET['detail'])) {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Access-Control-Allow-Origin: *');
+    serveDetail($_GET['detail']);
+    exit;
+}
+
 // ---------- modo JSON ----------
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
@@ -126,7 +134,6 @@ function initSession(): bool
         CURLOPT_SSL_VERIFYPEER => true,
     ]);
     $body = curl_exec($ch);
-    curl_close($ch);
 
     if (!$body || !preg_match('#URL=/cgi-bin/opac/([A-Za-z0-9]+)\?#i', $body, $m)) {
         return false;
@@ -218,7 +225,6 @@ function execCurl($ch): string|false
 {
     $response = curl_exec($ch);
     $errno    = curl_errno($ch);
-    curl_close($ch);
 
     if ($errno || $response === false) return false;
 
@@ -273,10 +279,13 @@ function parseBooks(string $html, string $token): array
 
         $linkNode = $xpath->query('.//h3//a[1]', $item)->item(0);
         if ($linkNode) {
-            $href = $linkNode->getAttribute('href');
-            $book['url'] = $detailBase . (str_starts_with($href, '?') ? $href : '?' . ltrim($href, '/'));
+            $href  = $linkNode->getAttribute('href');
+            $query = ltrim(str_starts_with($href, '?') ? $href : '?' . ltrim($href, '/'), '?');
+            $book['url']           = $detailBase . '?' . $query;
+            $book['detail_params'] = $query;
         } else {
-            $book['url'] = '';
+            $book['url']           = '';
+            $book['detail_params'] = '';
         }
 
         $authorNode = $xpath->query('.//span[contains(@class,"c-docs_author")]', $item)->item(0);
@@ -294,6 +303,210 @@ function parseBooks(string $html, string $token): array
     }
 
     return ['books' => $books, 'total' => $total];
+}
+
+function serveDetail(string $params): void
+{
+    // Solo caracteres válidos de query string
+    if (!preg_match('/^[A-Za-z0-9=&%_+.\-]+$/', $params)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Parámetros inválidos']);
+        return;
+    }
+
+    if (!sessionIsValid()) {
+        clearPageCache();
+        if (!initSession()) {
+            http_response_code(502);
+            echo json_encode(['error' => 'No se pudo iniciar sesión en el catálogo']);
+            return;
+        }
+    }
+
+    $session = json_decode(file_get_contents(SESSION_FILE), true);
+    $token   = $session['token'];
+    $html    = fetchDetail($token, $params);
+
+    if ($html === false || str_contains($html, 'timeout.htm')) {
+        clearPageCache();
+        if (!initSession()) {
+            http_response_code(502);
+            echo json_encode(['error' => 'Sesión expirada, inténtalo de nuevo']);
+            return;
+        }
+        $session = json_decode(file_get_contents(SESSION_FILE), true);
+        $token   = $session['token'];
+        $html    = fetchDetail($token, $params);
+    }
+
+    if ($html === false) {
+        http_response_code(502);
+        echo json_encode(['error' => 'No se pudo obtener el detalle del libro']);
+        return;
+    }
+
+    echo json_encode(parseDetail($html), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+}
+
+function fetchDetail(string $token, string $params): string|false
+{
+    $url     = OPAC_BASE . '/cgi-bin/opac/' . $token . '/NT4?' . $params;
+    $referer = OPAC_BASE . '/cgi-bin/opac/' . $token . '/NT1';
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_COOKIEFILE     => COOKIE_FILE,
+        CURLOPT_HTTPHEADER     => array_merge(commonHeaders(), [
+            'Referer: ' . $referer,
+        ]),
+        CURLOPT_SSL_VERIFYPEER => true,
+    ]);
+    return execCurl($ch);
+}
+
+function parseDetail(string $html): array
+{
+    if (str_contains($html, 'timeout.htm')) {
+        return ['error' => 'La sesión ha expirado'];
+    }
+
+    libxml_use_internal_errors(true);
+    $doc = new DOMDocument();
+    $doc->loadHTML('<?xml encoding="utf-8"?>' . $html);
+    libxml_clear_errors();
+    $xpath = new DOMXPath($doc);
+
+    $detail = ['cover' => '', 'title' => '', 'fields' => [], 'synopsis' => '', 'holdings' => []];
+
+    // ── Portada ───────────────────────────────────────────────
+    $imgNode = $xpath->query(
+        '//*[contains(@class,"c-detail_cover")]//img |
+         //*[contains(@class,"c-detail_img")]//img |
+         //*[contains(@class,"c-docs_img")]//img'
+    )->item(0);
+    if ($imgNode) {
+        $src = $imgNode->getAttribute('src');
+        $src = str_starts_with($src, 'http') ? $src : OPAC_BASE . $src;
+        $detail['cover'] = str_contains($src, 'nofound') ? '' : 'proxy.php?cover=' . urlencode($src);
+    }
+
+    // ── Título ────────────────────────────────────────────────
+    $titleNode = $xpath->query(
+        '//*[contains(@class,"c-detail_title")] |
+         //*[contains(@class,"c-docs_title")] |
+         //h1[not(ancestor::nav)][not(ancestor::header)]'
+    )->item(0);
+    if ($titleNode) {
+        $detail['title'] = trim(rtrim($titleNode->textContent, ' /'));
+    }
+
+    // ── Resumen / sinopsis ────────────────────────────────────
+    $synopsisNode = $xpath->query(
+        '//*[contains(@class,"c-detail_synopsis")] |
+         //*[contains(@class,"c-detail_desc")] |
+         //*[contains(@class,"c-detail_summary")] |
+         //*[contains(@class,"c-record_synopsis")]'
+    )->item(0);
+    if ($synopsisNode) {
+        $detail['synopsis'] = trim($synopsisNode->textContent);
+    }
+
+    // ── Campos bibliográficos (dt/dd) ─────────────────────────
+    // Intentar primero en el área de detalle, luego fallback a toda la página
+    $dts = $xpath->query(
+        '//*[contains(@class,"c-detail")]//dt |
+         //*[contains(@class,"c-record")]//dt |
+         //*[@id="detail"]//dt'
+    );
+    if ($dts->length === 0) {
+        $dts = $xpath->query('//main//dt | //article//dt | //section//dt');
+    }
+    if ($dts->length === 0) {
+        $dts = $xpath->query('//dl//dt');
+    }
+
+    foreach ($dts as $dt) {
+        $label = trim($dt->textContent, ": \t\n\r");
+        if (!$label || mb_strlen($label) > 80) continue;
+
+        $dd = $dt->nextSibling;
+        while ($dd && $dd->nodeType !== XML_ELEMENT_NODE) {
+            $dd = $dd->nextSibling;
+        }
+        if ($dd && strtolower($dd->nodeName) === 'dd') {
+            $value = preg_replace('/\s+/', ' ', trim($dd->textContent));
+            if ($value && mb_strlen($value) < 500) {
+                $detail['fields'][] = ['label' => $label, 'value' => $value];
+            }
+        }
+    }
+
+    // ── Disponibilidad / ejemplares ───────────────────────────
+    $holdTable = $xpath->query(
+        '//*[contains(@id,"copias_table")]//table |
+         //*[contains(@class,"copias_table")]//table |
+         //*[contains(@class,"c-holdings")]//table |
+         //*[contains(@class,"c-avail")]//table |
+         //*[contains(@class,"c-copies")]//table |
+         //*[contains(@class,"c-ejemplares")]//table |
+         //*[@id="holdings"]//table'
+    )->item(0);
+
+    if ($holdTable) {
+        $headers = [];
+        $rows = $xpath->query('.//tr', $holdTable);
+        foreach ($rows as $row) {
+            $ths = $xpath->query('.//th', $row);
+            $tds = $xpath->query('.//td', $row);
+            if ($ths->length > 0) {
+                $headers = [];
+                foreach ($ths as $th) $headers[] = trim($th->textContent);
+            } elseif ($tds->length > 0) {
+                $cells     = [];
+                $dataLabels = [];
+                foreach ($tds as $td) {
+                    $text = preg_replace('/\s+/', ' ', trim($td->textContent));
+                    // data-label contiene la etiqueta responsiva exacta (puede diferir del <th>)
+                    $dataLabels[] = trim($td->getAttribute('data-label'));
+                    $cells[] = $text;
+                }
+                if ($headers) {
+                    $holding = [];
+                    foreach ($cells as $i => $val) {
+                        if (!isset($headers[$i]) || $val === '') continue;
+                        $header = $headers[$i];
+                        // 1) Usar data-label si está disponible (más preciso que el header)
+                        $label = $dataLabels[$i] ?? '';
+                        $prefix = $label ?: $header;
+                        if ($prefix !== '' && mb_stripos($val, $prefix) === 0) {
+                            $val = trim(mb_substr($val, mb_strlen($prefix)));
+                        }
+                        if ($val !== '') $holding[$header] = $val;
+                    }
+                    if ($holding) $detail['holdings'][] = $holding;
+                } else {
+                    $filtered = array_values(array_filter($cells, fn($c) => $c !== ''));
+                    if ($filtered) $detail['holdings'][] = $filtered;
+                }
+            }
+        }
+    }
+
+    // Eliminar campos con la misma combinación label+valor
+    $seen = [];
+    $unique = [];
+    foreach ($detail['fields'] as $f) {
+        $key = mb_strtolower($f['label'] . '||' . $f['value']);
+        if (!isset($seen[$key])) {
+            $seen[$key] = true;
+            $unique[] = $f;
+        }
+    }
+    $detail['fields'] = $unique;
+
+    return $detail;
 }
 
 function serveCover(string $url): void
@@ -335,7 +548,6 @@ function serveCover(string $url): void
     $imgData     = curl_exec($ch);
     $httpCode    = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $contentType = strtok(curl_getinfo($ch, CURLINFO_CONTENT_TYPE), "\r\n");
-    curl_close($ch);
 
     if (!$imgData || $httpCode !== 200 || !str_starts_with($contentType, 'image/')) {
         http_response_code(404);
