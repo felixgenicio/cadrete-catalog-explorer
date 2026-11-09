@@ -175,7 +175,7 @@ function fetchFirstPage(string $opacUrl): string|false
         'groups'   => 'S',
         'groupg'   => 'BG',
         'xstype'   => 'COPI',
-        'xsdate'   => '7',
+        'xsdate'   => '90',
         'subcat'   => 'OPA/CADRET',
         'FORM'     => '5',
         'select03' => '01',

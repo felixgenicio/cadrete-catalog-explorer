@@ -482,6 +482,17 @@
         totalEl.textContent = `${total} novedades encontradas`;
       }
 
+      // Sin resultados en la primera página: mostrar mensaje y terminar
+      if (nextStart === 1 && data.books.length === 0) {
+        contentEl.innerHTML = `
+          <div class="state">
+            <div class="state-icon">📚</div>
+            <p>No hay novedades en los últimos 90 días.<br><small>Vuelve a consultar más adelante.</small></p>
+          </div>`;
+        observer.unobserve(sentinelEl);
+        return;
+      }
+
       appendBooks(data.books);
       nextStart += PAGE_SIZE;
 
