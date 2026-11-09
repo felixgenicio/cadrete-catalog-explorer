@@ -17,6 +17,10 @@ define('CACHE_DIR',     __DIR__ . '/cache');
 define('CACHE_TTL',     3600);
 define('SESSION_FILE',  CACHE_DIR . '/session.json');
 define('COOKIE_FILE',   CACHE_DIR . '/cookies.txt');
+define('LIST_FILE',     CACHE_DIR . '/novedades.json');
+define('REGS_FILE',     CACHE_DIR . '/registros.json');
+define('PAGE_SIZE',     10);
+define('COVER_NONE',    'none');   // marca de "sin portada" en cache/covers/*.meta
 
 define('OPAC_BASE',  'https://bibliotecas.aragon.es');
 define('OPAC_ENTRY', OPAC_BASE . '/cgi-bin/opac');
@@ -40,63 +44,31 @@ header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 
 $start = max(1, (int)($_GET['start'] ?? 1));
-$cacheFile = CACHE_DIR . '/novedades_s' . $start . '.json';
 
-// Servir caché si es válida y la sesión no ha expirado
-if (sessionIsValid() && file_exists($cacheFile) && (time() - filemtime($cacheFile)) < CACHE_TTL) {
-    echo file_get_contents($cacheFile);
-    exit;
+// Lista completa ordenada por fecha de alta (caché 1h, ligada a la sesión)
+$list = null;
+if (sessionIsValid() && file_exists(LIST_FILE) && (time() - filemtime(LIST_FILE)) < CACHE_TTL) {
+    $list = json_decode(file_get_contents(LIST_FILE), true);
 }
-
-// Si la sesión expiró o no existe, iniciar una nueva búsqueda
-// (esto invalida todas las páginas cacheadas de la sesión anterior)
-if (!sessionIsValid()) {
-    clearPageCache();
-    if (!initSession()) {
-        http_response_code(502);
-        echo json_encode(['error' => 'No se pudo iniciar sesión en el catálogo de Aragón']);
-        exit;
-    }
+if (!$list) {
+    // Rehacer la búsqueda completa; reintentar una vez si el OPAC falla
+    $list = buildSortedList() ?: buildSortedList();
 }
-
-// Obtener el token de sesión activo
-$session = json_decode(file_get_contents(SESSION_FILE), true);
-$token   = $session['token'];
-$opacUrl = OPAC_BASE . '/cgi-bin/opac/' . $token . '/NT1';
-
-// Fetch de la página solicitada
-$html = ($start === 1)
-    ? fetchFirstPage($opacUrl)
-    : fetchPage($opacUrl, $start);
-
-if ($html === false) {
-    // Puede que la sesión haya expirado en el servidor; reintentar una vez
-    clearPageCache();
-    if (!initSession()) {
-        http_response_code(502);
-        echo json_encode(['error' => 'No se pudo obtener las novedades del catálogo']);
-        exit;
-    }
-    $session = json_decode(file_get_contents(SESSION_FILE), true);
-    $token   = $session['token'];
-    $opacUrl = OPAC_BASE . '/cgi-bin/opac/' . $token . '/NT1';
-    $html    = ($start === 1) ? fetchFirstPage($opacUrl) : fetchPage($opacUrl, $start);
-}
-
-if ($html === false) {
+if (!$list) {
     http_response_code(502);
     echo json_encode(['error' => 'No se pudo obtener las novedades del catálogo']);
     exit;
 }
 
-['books' => $books, 'total' => $total] = parseBooks($html, $token);
-
-$json = json_encode(
-    ['updated' => date('c'), 'start' => $start, 'total' => $total, 'books' => $books],
+echo json_encode(
+    [
+        'updated' => $list['updated'],
+        'start'   => $start,
+        'total'   => $list['total'],
+        'books'   => array_slice($list['books'], $start - 1, PAGE_SIZE),
+    ],
     JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT
 );
-file_put_contents($cacheFile, $json);
-echo $json;
 
 // ==========================================================
 
@@ -108,7 +80,7 @@ function sessionIsValid(): bool
 
 function clearPageCache(): void
 {
-    foreach (glob(CACHE_DIR . '/novedades_s*.json') as $f) {
+    foreach (glob(CACHE_DIR . '/novedades*.json') as $f) {
         unlink($f);
     }
     if (file_exists(COOKIE_FILE)) unlink(COOKIE_FILE);
@@ -116,11 +88,88 @@ function clearPageCache(): void
 }
 
 /**
+ * Inicia sesión, descarga todas las páginas de resultados y las ordena
+ * por fecha de alta del ejemplar de Cadrete (más recientes primero).
+ *
+ * El OPAC no expone la fecha de alta ni permite ordenar por ella, pero el
+ * número de registro local del ejemplar ($9 en el MARC) es correlativo, así
+ * que ordenar por él equivale a ordenar por fecha de alta. El número se saca
+ * de la ficha de detalle y se cachea de forma permanente por registro
+ * bibliográfico (TITN), de modo que solo se consulta la ficha de libros nuevos.
+ */
+function buildSortedList(): array|false
+{
+    // La primera vez hay que abrir la ficha de cada libro
+    set_time_limit(180);
+    clearPageCache();
+    $html = initSession();
+    if ($html === false) return false;
+
+    $token   = json_decode(file_get_contents(SESSION_FILE), true)['token'];
+    $opacUrl = OPAC_BASE . '/cgi-bin/opac/' . $token . '/NT1';
+
+    ['books' => $books, 'total' => $total] = parseBooks($html, $token);
+    for ($s = 1 + PAGE_SIZE; $s <= $total; $s += PAGE_SIZE) {
+        $page = fetchPage($opacUrl, $s);
+        if ($page === false || str_contains($page, 'timeout.htm')) return false;
+        array_push($books, ...parseBooks($page, $token)['books']);
+    }
+
+    // Número de registro de cada libro (caché permanente)
+    $regs = file_exists(REGS_FILE) ? (json_decode(file_get_contents(REGS_FILE), true) ?: []) : [];
+    $dirty = false;
+    foreach ($books as $b) {
+        if (!$b['titn'] || isset($regs[$b['titn']]) || !$b['detail_params']) continue;
+        $detail = fetchDetail($token, $b['detail_params']);
+        $reg    = $detail === false ? null : parseRegistro($detail);
+        if ($reg) {
+            $regs[$b['titn']] = $reg;
+            $dirty = true;
+        }
+    }
+    if ($dirty) file_put_contents(REGS_FILE, json_encode($regs, JSON_PRETTY_PRINT));
+
+    // Más recientes primero; sin registro conocido, al final
+    usort($books, function ($a, $b) use ($regs) {
+        $ra = $regs[$a['titn']] ?? [0, 0];
+        $rb = $regs[$b['titn']] ?? [0, 0];
+        return $rb <=> $ra;
+    });
+
+    $books = array_map(function ($b) {
+        unset($b['titn']);
+        return $b;
+    }, $books);
+
+    $list = ['updated' => date('c'), 'total' => count($books), 'books' => $books];
+    file_put_contents(LIST_FILE, json_encode($list, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+    return $list;
+}
+
+/**
+ * Extrae [registro local ($9), id de ejemplar ($p)] del ejemplar de Cadrete
+ * en la vista MARC de la ficha. Si hay varios ejemplares, el más reciente.
+ */
+function parseRegistro(string $html): ?array
+{
+    $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    if (!preg_match_all('/\$a CADRET \$b CADRET[^\n]*?\$9 (\d+)[^\n]*?\$p (\d+)/', $text, $m, PREG_SET_ORDER)) {
+        return null;
+    }
+    $best = null;
+    foreach ($m as $row) {
+        $cur = [(int)$row[1], (int)$row[2]];
+        if ($best === null || $cur > $best) $best = $cur;
+    }
+    return $best;
+}
+
+/**
  * Obtiene un token de sesión y ejecuta la búsqueda inicial (POST ACC=131)
  * para que el servidor OPAC tenga el resultado en caché de sesión.
- * Guarda cookies y token en disco.
+ * Guarda cookies y token en disco. Devuelve el HTML de la primera página.
  */
-function initSession(): bool
+function initSession(): string|false
 {
     if (!is_dir(CACHE_DIR)) mkdir(CACHE_DIR, 0755, true);
 
@@ -148,15 +197,7 @@ function initSession(): bool
     // Guardar sesión
     file_put_contents(SESSION_FILE, json_encode(['token' => $token, 'created' => date('c')]));
 
-    // Cachear la página 1 ya que la tenemos
-    ['books' => $books, 'total' => $total] = parseBooks($html, $token);
-    $json = json_encode(
-        ['updated' => date('c'), 'start' => 1, 'total' => $total, 'books' => $books],
-        JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT
-    );
-    file_put_contents(CACHE_DIR . '/novedades_s1.json', $json);
-
-    return true;
+    return $html;
 }
 
 /**
@@ -266,6 +307,10 @@ function parseBooks(string $html, string $token): array
 
     foreach ($items as $item) {
         $book = [];
+
+        // Id estable del registro bibliográfico (para la caché de registros)
+        $titnNode = $xpath->query('.//span[contains(@class,"js-TITN")]', $item)->item(0);
+        $book['titn'] = $titnNode ? trim($titnNode->textContent) : '';
 
         $imgNode = $xpath->query('.//div[contains(@class,"c-docs_img")]//img', $item)->item(0);
         if ($imgNode) {
@@ -527,6 +572,11 @@ function serveCover(string $url): void
     $cacheImg  = $cacheDir . '/' . $cacheKey . '.img';
 
     if (file_exists($cacheImg) && file_exists($cacheMeta)) {
+        // Portada inexistente ya conocida (o píxel de relleno cacheado antes de este filtro)
+        if (trim(file_get_contents($cacheMeta)) === COVER_NONE || isPlaceholderImage(file_get_contents($cacheImg))) {
+            http_response_code(404);
+            return;
+        }
         header('Content-Type: ' . trim(file_get_contents($cacheMeta)));
         header('Cache-Control: public, max-age=86400');
         readfile($cacheImg);
@@ -554,10 +604,29 @@ function serveCover(string $url): void
         exit;
     }
 
+    // covers.absys.cloud responde 200 con un JPEG de 1×1 cuando no tiene portada:
+    // tratarlo como "sin portada" (el frontend muestra su placeholder) y recordarlo
+    if (isPlaceholderImage($imgData)) {
+        file_put_contents($cacheImg, '');
+        file_put_contents($cacheMeta, COVER_NONE);
+        http_response_code(404);
+        exit;
+    }
+
     file_put_contents($cacheImg,  $imgData);
     file_put_contents($cacheMeta, $contentType);
 
     header('Content-Type: ' . $contentType);
     header('Cache-Control: public, max-age=86400');
     echo $imgData;
+}
+
+/**
+ * true si la imagen es un relleno (p. ej. el píxel 1×1 que sirve
+ * covers.absys.cloud cuando no tiene portada) o no es una imagen válida.
+ */
+function isPlaceholderImage(string $data): bool
+{
+    $size = @getimagesizefromstring($data);
+    return !$size || $size[0] < 20 || $size[1] < 20;
 }
