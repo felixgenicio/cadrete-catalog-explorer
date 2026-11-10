@@ -20,6 +20,8 @@ define('COOKIE_FILE',   CACHE_DIR . '/cookies.txt');
 define('LIST_FILE',     CACHE_DIR . '/novedades.json');
 define('REGS_FILE',     CACHE_DIR . '/registros.json');
 define('PAGE_SIZE',     10);
+define('DETAIL_BUDGET', 20);       // segundos máx. abriendo fichas por petición (fcgid corta a los 31)
+define('REGS_SAVE_EVERY', 10);     // guardar registros.json cada N fichas nuevas
 define('COVER_NONE',    'none');   // marca de "sin portada" en cache/covers/*.meta
 
 define('OPAC_BASE',  'https://bibliotecas.aragon.es');
@@ -117,17 +119,23 @@ function buildSortedList(): array|false
 
     // Número de registro de cada libro (caché permanente)
     $regs = file_exists(REGS_FILE) ? (json_decode(file_get_contents(REGS_FILE), true) ?: []) : [];
-    $dirty = false;
+    // Se guarda por tandas y con un tope de tiempo: si Apache corta la
+    // petición, lo ya consultado no se pierde y la siguiente sigue donde iba.
+    $saveRegs = function () use (&$regs) { file_put_contents(REGS_FILE, json_encode($regs, JSON_PRETTY_PRINT)); };
+    $deadline = ($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true)) + DETAIL_BUDGET;
+    $pending  = 0;
+    $complete = true;
     foreach ($books as $b) {
         if (!$b['titn'] || isset($regs[$b['titn']]) || !$b['detail_params']) continue;
+        if (microtime(true) > $deadline) { $complete = false; break; }
         $detail = fetchDetail($token, $b['detail_params']);
         $reg    = $detail === false ? null : parseRegistro($detail);
         if ($reg) {
             $regs[$b['titn']] = $reg;
-            $dirty = true;
+            if (++$pending >= REGS_SAVE_EVERY) { $saveRegs(); $pending = 0; }
         }
     }
-    if ($dirty) file_put_contents(REGS_FILE, json_encode($regs, JSON_PRETTY_PRINT));
+    if ($pending) $saveRegs();
 
     // Más recientes primero; sin registro conocido, al final
     usort($books, function ($a, $b) use ($regs) {
@@ -142,7 +150,11 @@ function buildSortedList(): array|false
     }, $books);
 
     $list = ['updated' => date('c'), 'total' => count($books), 'books' => $books];
-    file_put_contents(LIST_FILE, json_encode($list, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+    // Si faltan fichas por consultar, no se cachea la lista: la próxima
+    // petición la reconstruye y completa los registros que falten.
+    if ($complete) {
+        file_put_contents(LIST_FILE, json_encode($list, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+    }
     return $list;
 }
 
